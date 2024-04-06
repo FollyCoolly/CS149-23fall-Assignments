@@ -129,7 +129,7 @@ int main(int argc, char** argv) {
 
     double minSerial = 1e30;
     for (int i = 0; i < 5; ++i) {
-       memset(output_serial, 0, width * height * sizeof(int));
+        memset(output_serial, 0, width * height * sizeof(int));
         double startTime = CycleTimer::currentSeconds();
         mandelbrotSerial(x0, y0, x1, y1, width, height, 0, height, maxIterations, output_serial);
         double endTime = CycleTimer::currentSeconds();
@@ -138,34 +138,37 @@ int main(int argc, char** argv) {
 
     printf("[mandelbrot serial]:\t\t[%.3f] ms\n", minSerial * 1000);
     writePPMImage(output_serial, width, height, "mandelbrot-serial.ppm", maxIterations);
-
     //
     // Run the threaded version
     //
+   
+    for(int thread_num = 2; thread_num <= numThreads; ++thread_num){
+        printf("[thread num]: %d\t\t ----\n", thread_num);
 
-    double minThread = 1e30;
-    for (int i = 0; i < 5; ++i) {
-      memset(output_thread, 0, width * height * sizeof(int));
-        double startTime = CycleTimer::currentSeconds();
-        mandelbrotThread(numThreads, x0, y0, x1, y1, width, height, maxIterations, output_thread);
-        double endTime = CycleTimer::currentSeconds();
-        minThread = std::min(minThread, endTime - startTime);
+        double minThread = 1e30;
+        for (int i = 0; i < 5; ++i) {
+            memset(output_thread, 0, width * height * sizeof(int));
+            double startTime = CycleTimer::currentSeconds();
+            mandelbrotThread(thread_num, x0, y0, x1, y1, width, height, maxIterations, output_thread);
+            double endTime = CycleTimer::currentSeconds();
+            minThread = std::min(minThread, endTime - startTime);
+        }   
+
+        printf("[mandelbrot thread]:\t\t[%.3f] ms\n", minThread * 1000);
+        writePPMImage(output_thread, width, height, "mandelbrot-thread.ppm", maxIterations);
+
+        if (! verifyResult (output_serial, output_thread, width, height)) {
+            printf ("Error : Output from threads does not match serial output\n");
+
+            delete[] output_serial;
+            delete[] output_thread;
+
+            return 1;
+        }
+
+        // compute speedup
+        printf("\t\t\t\t(%.2fx speedup from %d threads)\n", minSerial/minThread, thread_num);
     }
-
-    printf("[mandelbrot thread]:\t\t[%.3f] ms\n", minThread * 1000);
-    writePPMImage(output_thread, width, height, "mandelbrot-thread.ppm", maxIterations);
-
-    if (! verifyResult (output_serial, output_thread, width, height)) {
-        printf ("Error : Output from threads does not match serial output\n");
-
-        delete[] output_serial;
-        delete[] output_thread;
-
-        return 1;
-    }
-
-    // compute speedup
-    printf("\t\t\t\t(%.2fx speedup from %d threads)\n", minSerial/minThread, numThreads);
 
     delete[] output_serial;
     delete[] output_thread;
