@@ -19,6 +19,7 @@ void sqrtSerial(int N,
         float error = fabs(guess * guess * x - 1.f);
 
         while (error > kThreshold) {
+            
             guess = (3.f * guess - x * guess * guess * guess) * 0.5f;
             error = fabs(guess * guess * x - 1.f);
         }
