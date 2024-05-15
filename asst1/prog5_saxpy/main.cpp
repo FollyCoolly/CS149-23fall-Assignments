@@ -1,11 +1,29 @@
 #include <stdio.h>
 #include <algorithm>
+#include <immintrin.h> 
+#include <omp.h>
 
 #include "CycleTimer.h"
 #include "saxpy_ispc.h"
 
 extern void saxpySerial(int N, float a, float* X, float* Y, float* result);
 
+void saxpyAVX(int N, float scale, float *x, float *y, float *result) {
+    int i;
+
+    __m256 scale_vec = _mm256_set1_ps(scale); 
+    for (i = 0; i + 8 <= N ; i += 8) {
+        __m256 x_vec = _mm256_loadu_ps(&x[i]); 
+        __m256 y_vec = _mm256_loadu_ps(&y[i]); 
+        __m256 res_vec = _mm256_add_ps(_mm256_mul_ps(scale_vec, x_vec), y_vec); 
+        _mm256_storeu_ps(&result[i], res_vec); 
+    }
+
+    // 处理剩余部分
+    for (/**/; i < N; i++) {
+        result[i] = scale * x[i] + y[i];
+    }
+}
 
 // return GB/s
 static float
@@ -42,6 +60,7 @@ int main() {
     float* resultSerial = new float[N];
     float* resultISPC = new float[N];
     float* resultTasks = new float[N];
+    float* resultAVX = new float[N];
 
     // initialize array values
     for (unsigned int i=0; i<N; i++)
@@ -51,6 +70,7 @@ int main() {
         resultSerial[i] = 0.f;
         resultISPC[i] = 0.f;
         resultTasks[i] = 0.f;
+        resultAVX[i] = 0.f;
     }
 
     //
@@ -65,10 +85,10 @@ int main() {
         minSerial = std::min(minSerial, endTime - startTime);
     }
 
-// printf("[saxpy serial]:\t\t[%.3f] ms\t[%.3f] GB/s\t[%.3f] GFLOPS\n",
-    //       minSerial * 1000,
-    //       toBW(TOTAL_BYTES, minSerial),
-    //       toGFLOPS(TOTAL_FLOPS, minSerial));
+    printf("[saxpy serial]:\t\t[%.3f] ms\t[%.3f] GB/s\t[%.3f] GFLOPS\n",
+            minSerial * 1000,
+            toBW(TOTAL_BYTES, minSerial),
+            toGFLOPS(TOTAL_FLOPS, minSerial));
 
     //
     // Run the ISPC (single core) implementation
@@ -106,9 +126,28 @@ int main() {
            toBW(TOTAL_BYTES, minTaskISPC),
            toGFLOPS(TOTAL_FLOPS, minTaskISPC));
 
+    //
+    // Run the AVX implementation
+    //
+    double minAVX = 1e30;
+    for (int i = 0; i < 3; ++i) {
+        double startTime = CycleTimer::currentSeconds();
+        saxpyAVX(N, scale, arrayX, arrayY, resultTasks);
+        double endTime = CycleTimer::currentSeconds();
+        minAVX = std::min(minAVX, endTime - startTime);
+    }
+
+    verifyResult(N, resultTasks, resultSerial);
+
+    printf("[saxpy AVX]:\t[%.3f] ms\t[%.3f] GB/s\t[%.3f] GFLOPS\n",
+           minAVX * 1000,
+           toBW(TOTAL_BYTES, minAVX),
+           toGFLOPS(TOTAL_FLOPS, minAVX));
+
     printf("\t\t\t\t(%.2fx speedup from use of tasks)\n", minISPC/minTaskISPC);
-    //printf("\t\t\t\t(%.2fx speedup from ISPC)\n", minSerial/minISPC);
-    //printf("\t\t\t\t(%.2fx speedup from task ISPC)\n", minSerial/minTaskISPC);
+    printf("\t\t\t\t(%.2fx speedup from ISPC)\n", minSerial/minISPC);
+    printf("\t\t\t\t(%.2fx speedup from task ISPC)\n", minSerial/minTaskISPC);
+    printf("\t\t\t\t(%.2fx speedup from task AVX)\n", minSerial/minAVX);
 
     delete[] arrayX;
     delete[] arrayY;
