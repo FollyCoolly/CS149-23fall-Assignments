@@ -1,12 +1,26 @@
 #include <algorithm>
 #include <math.h>
+#include <numeric>
 #include <stdio.h>
 #include <stdlib.h>
 #include <thread>
+#include <vector>
 
 #include "CycleTimer.h"
 
 using namespace std;
+
+class AccumulateTimer {
+public:
+  AccumulateTimer(double *total_time) : total_time_(total_time), start_time_(CycleTimer::currentSeconds()) {}
+
+  ~AccumulateTimer() {
+    *total_time_ += CycleTimer::currentSeconds() - start_time_;
+  }
+private:
+  double *total_time_;
+  double start_time_;
+};
 
 typedef struct {
   // Control work assignments
@@ -195,6 +209,10 @@ void kMeansThread(double *data, double *clusterCentroids, int *clusterAssignment
     currCost[k] = 0.0;
   }
 
+  double assignment_time = 0;
+  double centroid_time = 0;
+  double cost_time = 0;
+
   /* Main K-Means Algorithm Loop */
   int iter = 0;
   while (!stoppingConditionMet(prevCost, currCost, epsilon, K)) {
@@ -206,13 +224,39 @@ void kMeansThread(double *data, double *clusterCentroids, int *clusterAssignment
     // Setup args struct
     args.start = 0;
     args.end = K;
+    {
+      AccumulateTimer timer(&assignment_time);
+      int num_threads = std::thread::hardware_concurrency();
+      int chunk_size = M / num_threads;
+      std::vector<std::thread> threads;
+      std::vector<WorkerArgs> worker_args(num_threads, args);
+      for(int i = 0; i < num_threads; ++i) {
+        worker_args[i].M = (i == num_threads - 1) ? (M - chunk_size * (num_threads - 1)) : chunk_size;
+        worker_args[i].data = data + i * chunk_size;
+        threads.emplace_back(computeAssignments, &worker_args[i]);
+      }
+      for(auto& thread : threads) {
+        thread.join();
+      }
 
-    computeAssignments(&args);
-    computeCentroids(&args);
-    computeCost(&args);
+      //computeAssignments(&args);
+
+    }
+    {
+      AccumulateTimer timer(&centroid_time);
+      computeCentroids(&args);
+    }
+    {
+      AccumulateTimer timer(&cost_time);
+      computeCost(&args);
+    }
 
     iter++;
   }
+
+  printf("[Assignment Time]: %.3f ms\n", assignment_time * 1000);
+  printf("[Centroid Time]: %.3f ms\n", centroid_time * 1000);
+  printf("[Cost Time]: %.3f ms\n", cost_time * 1000);
 
   free(currCost);
   free(prevCost);
